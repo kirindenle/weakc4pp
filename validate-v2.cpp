@@ -18,6 +18,8 @@ typedef int16_t s16;
 typedef int32_t s32;
 typedef int64_t s64;
 
+#define global static
+
 #define ROWS 6
 #define COLS 7
 
@@ -207,7 +209,7 @@ static bool is_steady_state_entry(BranchMove state)
 }
 
 // TODO: simpler code for this... maybe just one fread is enough
-void load_file(char const* path, char const* bufferFile, const int bufferFileMaxCount, int* fileCount)
+void loadFile(char const* path, char const* bufferFile, const int bufferFileMaxCount, int* fileCount)
 {
   FILE* f = fopen(path, "rb");
   if (!f)
@@ -239,18 +241,28 @@ void load_file(char const* path, char const* bufferFile, const int bufferFileMax
 #define MAX_BRANCHES 1000
 #define MAX_STEADY_STATES 1000
 #define OUGHT_TO_BE_ENOUGH 640000
-int branchesFileCount = 0;
-char branchesFile[OUGHT_TO_BE_ENOUGH];
-int steadyStatesFileCount = 0;
-char steadyStatesFile[OUGHT_TO_BE_ENOUGH];
-s32 branchesCount = 0;
-Branch branches[MAX_BRANCHES];
-s32 steadyStatesCount = 0;
-Diagram steadyStates[MAX_STEADY_STATES];
 
-static void add_branch(char const* moves, int movesCount, BranchType branchType, s16 branchValue)
+struct Files
 {
-  if (branchesCount >= MAX_BRANCHES)
+  int branchesFileCount = 0;
+  char branchesFile[OUGHT_TO_BE_ENOUGH];
+  int steadyStatesFileCount = 0;
+  char steadyStatesFile[OUGHT_TO_BE_ENOUGH];
+};
+
+struct ConnectFourSolution
+{
+  s32 branchesCount = 0;
+  Branch branches[MAX_BRANCHES];
+  s32 steadyStatesCount = 0;
+  Diagram steadyStates[MAX_STEADY_STATES];
+};
+global Files originalFiles;
+global ConnectFourSolution originalSolution;
+
+static void addBranch(ConnectFourSolution& solution, char const* moves, int movesCount, BranchType branchType, s16 branchValue)
+{
+  if (solution.branchesCount >= MAX_BRANCHES)
   {
     fprintf(stderr, "too many branches\n");
     exit(-1);
@@ -263,14 +275,14 @@ static void add_branch(char const* moves, int movesCount, BranchType branchType,
       exit(-1);
     }
   }
-  branches[branchesCount].moves = moves;
-  branches[branchesCount].movesCount = movesCount;
-  branches[branchesCount].state.type = branchType;
-  branches[branchesCount].state.value = branchValue;
-  branchesCount += 1;
+  solution.branches[solution.branchesCount].moves = moves;
+  solution.branches[solution.branchesCount].movesCount = movesCount;
+  solution.branches[solution.branchesCount].state.type = branchType;
+  solution.branches[solution.branchesCount].state.value = branchValue;
+  solution.branchesCount += 1;
 }
 
-static void parse_branches()
+static void parseBranches(ConnectFourSolution& solution, char *branchesFile, int branchesFileCount)
 {
   s32 positionStart = -1;
   s32 positionCount = 0;
@@ -280,6 +292,11 @@ static void parse_branches()
   for (s32 i = 0; i < branchesFileCount; ++i)
   {
     char c = branchesFile[i];
+    if (c == '-')
+    {
+      fprintf(stderr, "branches json file can't contain minuses\n");
+      exit(-1);
+    }
     switch (parseState)
     {
       case LookingForPosition:
@@ -310,7 +327,7 @@ static void parse_branches()
         {
           if (prevc == '"')
           {
-            add_branch(&branchesFile[positionStart], positionCount, TypeMove, c);
+            addBranch(solution, &branchesFile[positionStart], positionCount, TypeMove, c);
             parseState = LookingForPosition;
           }
           else
@@ -330,7 +347,7 @@ static void parse_branches()
         }
         else
         {
-          add_branch(&branchesFile[positionStart], positionCount, TypeSteadyStateIndex, steadyStateIndex);
+          addBranch(solution, &branchesFile[positionStart], positionCount, TypeSteadyStateIndex, steadyStateIndex);
           parseState = LookingForPosition;
         }
       } break;
@@ -344,7 +361,7 @@ static void parse_branches()
   }
 }
 
-static void parse_steady_states()
+static void parseSteadyStates(ConnectFourSolution& solution, char *steadyStatesFile, int steadyStatesFileCount)
 {
   Column x = 0;
   Row yt = 0;
@@ -356,12 +373,12 @@ static void parse_steady_states()
     {
       continue;
     }
-    steadyStates[steadyStatesCount].cells[yt][x] = c;
+    solution.steadyStates[solution.steadyStatesCount].cells[yt][x] = c;
     digitsCollected += 1;
     if (digitsCollected == ROWS * COLS)
     {
       digitsCollected = 0;
-      steadyStatesCount += 1;
+      solution.steadyStatesCount += 1;
     }
     // I think this would be a cool function
     x += 1;
@@ -375,23 +392,23 @@ static void parse_steady_states()
       }
     }
   }
-  if (digitsCollected || x || yt || steadyStatesCount == 0)
+  if (digitsCollected || x || yt || solution.steadyStatesCount == 0)
   {
     fprintf(stderr, "error parsing steady stated (digits count in the file is not a multiple of ROWS * COLS), x = %d, yt = %d, digitsCollected = %d\n", x, yt, digitsCollected);
     exit(-1);
   }
 }
 
-static void load_branches(char const* path)
+static void loadBranches(ConnectFourSolution& solution, Files& files, char const* path)
 {
-  load_file(path, branchesFile, sizeof branchesFile, &branchesFileCount);
-  parse_branches();
+  loadFile(path, files.branchesFile, sizeof files.branchesFile, &files.branchesFileCount);
+  parseBranches(solution, files.branchesFile, files.branchesFileCount);
 }
 
-static void load_steady_states(char const* path)
+static void loadSteadyStates(ConnectFourSolution& solution, Files& files, char const* path)
 {
-  load_file(path, steadyStatesFile, sizeof steadyStatesFile, &steadyStatesFileCount);
-  parse_steady_states();
+  loadFile(path, files.steadyStatesFile, sizeof files.steadyStatesFile, &files.steadyStatesFileCount);
+  parseSteadyStates(solution, files.steadyStatesFile, files.steadyStatesFileCount);
 }
 
 #if 0
@@ -438,7 +455,7 @@ static Board board_from_position(Position position)
 }
 
 #if MEASURE_PERF
-static u64 makesFourTicks = 0;
+global u64 makesFourTicks = 0;
 #endif
 static bool makes_four_if_put_player(Board board, Column x, Row y, Player player)
 {
@@ -537,7 +554,7 @@ static Playable playable(Level level_char, Board board, Diagram diagram)
 }
 
 #if MEASURE_PERF
-static u64 queryTicks = 0;
+global u64 queryTicks = 0;
 #endif
 
 static Move query_steady_state(Board board, Diagram diagram)
@@ -709,7 +726,7 @@ static void add_to_memo(Board board, Memo* memo)
   memo->boardsCount += 1;
 }
 
-static Memo memo;
+global Memo memo;
 static bool red_turn(Board board)
 {
   Board key = board;
@@ -784,31 +801,39 @@ static bool verify_leaf(Diagram diagram, Board board)
   return red_turn(board);
 }
 
-#define MAX_POSITIONS 700
-struct SteadyStatePositions
+#define MAX_POSITIONS 31
+struct BranchIndexes
 {
-  s16 positions[MAX_POSITIONS];
-  s16 positionsCount = 0;
+  s16 branchIndexesCount = 0;
+  s16 branchIndexes[MAX_POSITIONS];
 };
 
-static SteadyStatePositions steadyStatesPositions[MAX_STEADY_STATES];
-//static s32 steadyStatesPositionsCount = 0;
-static s16 usefulSteadyStates[MAX_STEADY_STATES];
-static s16 usefulSteadyStatesCount = 0;
-
-static void collect_all_positions_for_all_steady_states()
+struct SteadyStateToAllBranchesItSolves
 {
-  for (s16 steadyStateIndex = 0; steadyStateIndex < steadyStatesCount; ++steadyStateIndex)
+  BranchIndexes table[MAX_STEADY_STATES];
+};
+
+struct SteadyStates
+{
+  s16 statesCount = 0;
+  s16 states[MAX_STEADY_STATES];
+};
+
+#define TRY_NON_LEAF_BRANCHES 0
+// NOTE: we use globals here because we don't want to pass them to red_turn cause it is recursive (and we try to reduce stack size of exponential search)
+// TODO: tru passing them anyway
+static void collectAllPositionsForAllSteadyStates(SteadyStateToAllBranchesItSolves& allToAll)
+{
+  for (s16 steadyStateIndex = 0; steadyStateIndex < originalSolution.steadyStatesCount; ++steadyStateIndex)
   {
     memset(&memo, 0, sizeof memo);
-    memo.diagram = steadyStates[steadyStateIndex];
-    auto s = &steadyStatesPositions[steadyStateIndex];
+    memo.diagram = originalSolution.steadyStates[steadyStateIndex];
+    auto s = &allToAll.table[steadyStateIndex];
     printf("checking steadyState %d:", steadyStateIndex);
-    for (s16 branchIndex = 0; branchIndex < branchesCount; ++branchIndex)
+    for (s16 branchIndex = 0; branchIndex < originalSolution.branchesCount; ++branchIndex)
     {
-      Branch b = branches[branchIndex];
-      // TODO: rerun again for literally all branches not even leafs, will it work?
-#if 0
+      Branch b = originalSolution.branches[branchIndex];
+#if !TRY_NON_LEAF_BRANCHES
       if (b.state.type != TypeSteadyStateIndex)
       {
         continue;
@@ -819,29 +844,42 @@ static void collect_all_positions_for_all_steady_states()
       bool redWins = red_turn(board);
       if (redWins)
       {
-        s->positions[s->positionsCount++] = branchIndex;
+        if (s->branchIndexesCount == _countof(s->branchIndexes))
+        {
+          fprintf(stderr, "this steady state solves too many positions\n");
+          exit(-1);
+        }
+        s->branchIndexes[s->branchIndexesCount++] = branchIndex;
         printf(" %d", branchIndex);
       }
     }
-    printf("\n");
+    printf(" (total %d)\n", s->branchIndexesCount);
   }
 }
 
-static s16 newSteadyStates[MAX_BRANCHES];
-static void collect_useful_steady_states_greedy()
+struct Replacements
 {
-  memset(&newSteadyStates, -1, sizeof newSteadyStates);
+  s16 newSteadyStates[MAX_BRANCHES]; // size is branches count
+};
+
+// fills replacements, allToAll map is volatile
+static void setCoverGreedy(Replacements& replacements, s16 branchesCount, SteadyStates& usefulSteadyStates, s16 steadyStatesCount, const SteadyStateToAllBranchesItSolves& allToAllOriginal)
+{
+  static SteadyStateToAllBranchesItSolves allToAll;
+  memcpy(&allToAll, &allToAllOriginal, sizeof allToAll);
+  for (s16 i = 0; i < branchesCount; ++i) replacements.newSteadyStates[i] = -1;
+  usefulSteadyStates.statesCount = 0;
   for (;;)
   {
     s16 maxPositions = 0;
     s16 maxPositionsIndex = -1;
-    for (s16 steadyStateIndex = 0; steadyStateIndex < steadyStatesCount; ++steadyStateIndex)
+    for (s16 steadyStateIndex = 0; steadyStateIndex < originalSolution.steadyStatesCount; ++steadyStateIndex)
     {
-      auto s = &steadyStatesPositions[steadyStateIndex];
-      if (s->positionsCount > maxPositions)
+      auto s = &allToAll.table[steadyStateIndex];
+      if (s->branchIndexesCount > maxPositions)
       {
         maxPositionsIndex = steadyStateIndex;
-        maxPositions = s->positionsCount;
+        maxPositions = s->branchIndexesCount;
       }
     }
     if (maxPositionsIndex == -1)
@@ -849,29 +887,29 @@ static void collect_useful_steady_states_greedy()
       break;
     }
     {
-      auto m = &steadyStatesPositions[maxPositionsIndex];
-      usefulSteadyStates[usefulSteadyStatesCount++] = maxPositionsIndex;
-      for (s16 i = 0; i < m->positionsCount; ++i)
+      auto m = &allToAll.table[maxPositionsIndex];
+      usefulSteadyStates.states[usefulSteadyStates.statesCount++] = maxPositionsIndex;
+      for (s16 i = 0; i < m->branchIndexesCount; ++i)
       {
-        s16 branchIndex = m->positions[i];
-        if (newSteadyStates[branchIndex] != -1)
+        s16 branchIndex = m->branchIndexes[i];
+        if (replacements.newSteadyStates[branchIndex] != -1)
         {
           fprintf(stderr, "trying to replace replacement\n");
           exit(-1);
         }
-        newSteadyStates[branchIndex] = maxPositionsIndex;
+        replacements.newSteadyStates[branchIndex] = maxPositionsIndex;
       }
     }
     for (s16 steadyStateIndex = 0; steadyStateIndex < steadyStatesCount; ++steadyStateIndex)
     {
-      auto s = &steadyStatesPositions[steadyStateIndex];
-      for (s16 i = 0; i < s->positionsCount;)
+      auto s = &allToAll.table[steadyStateIndex];
+      for (s16 i = 0; i < s->branchIndexesCount;)
       {
-        s16 branchIndex = s->positions[i];
-        if (newSteadyStates[branchIndex] != -1)
+        s16 branchIndex = s->branchIndexes[i];
+        if (replacements.newSteadyStates[branchIndex] != -1)
         {
-          s->positions[i] = s->positions[--s->positionsCount];
-          s->positions[s->positionsCount] = 0;
+          s->branchIndexes[i] = s->branchIndexes[--s->branchIndexesCount];
+          s->branchIndexes[s->branchIndexesCount] = 0;
         }
         else
         {
@@ -880,40 +918,15 @@ static void collect_useful_steady_states_greedy()
       }
     }
   }
-  printf("new branches with old steady state ids:\n");
-  printf("{\n");
-  for (s32 branchIndex = 0; branchIndex < branchesCount; ++branchIndex)
-  {
-    Branch b = branches[branchIndex];
-    s16 newSteadyState = newSteadyStates[branchIndex];
-    BranchMove state = b.state;
-    if (newSteadyState != -1)
-    {
-      if (state.type != TypeSteadyStateIndex)
-      {
-        fprintf(stderr, "unexpected branch type change\n");
-        exit(-1);
-      }
-      state.type = TypeSteadyStateIndex;
-      state.value = newSteadyState;
-    }
-    if (state.type == TypeMove)
-    {
-      printf("  \"%.*hs\": \"%c\",\n", b.movesCount, b.moves, (char)state.value);
-    }
-    else
-    {
-      printf("  \"%.*hs\": %d,\n", b.movesCount, b.moves, state.value);
-    }
-  }
-  printf("}\n");
 }
 
-Branch newBranches[MAX_BRANCHES];
-s16 oldFromNewStateId[MAX_STEADY_STATES];
-s16 newStatesCount = 0;
-s16 newFromOldStateId[MAX_STEADY_STATES];
-s16 oldStatesCount = 0;
+struct SteadyStateIdsRemappings
+{
+  s16 oldFromNewStateId[MAX_STEADY_STATES];
+  s16 newStatesCount = 0;
+  s16 newFromOldStateId[MAX_STEADY_STATES];
+  s16 oldStatesCount = 0;
+};
 
 static void insertionSort(s16 *a, s16 size)
 {
@@ -941,38 +954,49 @@ static void insertionSort(s16 *a, s16 size)
   }
 }
 
-static void fillRemappings()
+static void fillRemappings(SteadyStateIdsRemappings& remap, SteadyStates& usefulSteadyStates, s16 steadyStatesCount)
 {
-  for (s16 i = 0; i < usefulSteadyStatesCount; ++i)
+  for (s16 i = 0; i < usefulSteadyStates.statesCount; ++i)
   {
-    oldFromNewStateId[i] = usefulSteadyStates[i];
+    remap.oldFromNewStateId[i] = usefulSteadyStates.states[i];
   }
-  newStatesCount = usefulSteadyStatesCount;
-  insertionSort(oldFromNewStateId, newStatesCount);
-  oldStatesCount = steadyStatesCount;
-  for (s16 oldId = 0; oldId < oldStatesCount; ++oldId)
+  remap.newStatesCount = usefulSteadyStates.statesCount;
+  insertionSort(remap.oldFromNewStateId, remap.newStatesCount);
+  remap.oldStatesCount = steadyStatesCount;
+  for (s16 oldId = 0; oldId < remap.oldStatesCount; ++oldId)
   {
-    newFromOldStateId[oldId] = -1;
+    remap.newFromOldStateId[oldId] = -1;
   }
-  for (s16 newId = 0; newId < newStatesCount; ++newId)
+  for (s16 newId = 0; newId < remap.newStatesCount; ++newId)
   {
-    s16 oldId = oldFromNewStateId[newId];
-    newFromOldStateId[oldId] = newId;
+    s16 oldId = remap.oldFromNewStateId[newId];
+    remap.newFromOldStateId[oldId] = newId;
   }
-  for (s32 branchIndex = 0; branchIndex < branchesCount; ++branchIndex)
+}
+
+static void fillSolutionFromRemappings(ConnectFourSolution& newSolution, const ConnectFourSolution& oldSolution, const SteadyStateIdsRemappings& remap, const Replacements& replacements)
+{
+  newSolution.branchesCount = oldSolution.branchesCount;
+  for (s32 branchIndex = 0; branchIndex < oldSolution.branchesCount; ++branchIndex)
   {
-    Branch b = branches[branchIndex];
+    Branch b = oldSolution.branches[branchIndex];
     if (b.state.type == TypeSteadyStateIndex)
     {
-      s16 oldId = newSteadyStates[branchIndex];
+      s16 oldId = replacements.newSteadyStates[branchIndex];
       if (oldId == -1)
       {
         oldId = b.state.value;
       }
-      s16 newId = newFromOldStateId[oldId];
+      s16 newId = remap.newFromOldStateId[oldId];
       b.state.value = newId;
     }
-    newBranches[branchIndex] = b;
+    newSolution.branches[branchIndex] = b;
+  }
+  newSolution.steadyStatesCount = remap.newStatesCount;
+  for (s16 i = 0; i < remap.newStatesCount; ++i)
+  {
+    s16 oldId = remap.oldFromNewStateId[i];
+    newSolution.steadyStates[i] = oldSolution.steadyStates[oldId];
   }
 }
 
@@ -1002,7 +1026,7 @@ static void outBranches(char const* path, Branch *bs, s32 bsCount)
   fclose(f);
 }
 
-static void outNewSteadyStates(char const* path)
+static void outSteadyStates(char const* path, const Diagram *steadyStates, s16 steadyStatesCount)
 {
   FILE *f = fopen(path, "wb");
   if (!f)
@@ -1011,22 +1035,15 @@ static void outNewSteadyStates(char const* path)
     exit(-1);
   }
   fprintf(f, "[\n");
-  for (s16 newId = 0; newId < newStatesCount; ++newId)
+  for (s16 i = 0; i < steadyStatesCount; ++i)
   {
-    s16 oldId = oldFromNewStateId[newId];
-    if (oldId == -1)
-    {
-      fprintf(stderr, "oldId is not filled for newId %d\n", newId);
-      fclose(f);
-      exit(-1);
-    }
-    Diagram diagram = steadyStates[oldId];
+    Diagram diagram = steadyStates[i];
     fprintf(f, "  [\n");
     for (Row yt = 0; yt < ROWS; ++yt)
     {
       fprintf(f, "    \"%.*hs\"%hs\n", COLS, diagram.cells[yt], (yt == ROWS - 1 ? "" : ","));
     }
-    fprintf(f, "  ]%hs\n", (newId == newStatesCount - 1) ? "" : ",");
+    fprintf(f, "  ]%hs\n", (i == steadyStatesCount - 1) ? "" : ",");
   }
   fprintf(f, "]\n");
   fclose(f);
@@ -1064,14 +1081,15 @@ static void add_failure(Failures* f, Position position, s16 steadyStateIndex, ch
 
 const double cpuFrequencyEstimate = 3.5e+9;
 // branches and steady_states are globals, jobs is 1 cause we don't do multithreading
+// we use globals here so red_turn can be optimized better
 Failures check_steady_states_correct()
 {
   Failures result = {};
   s32 maxMemo = 0;
   u64 fullStart = __rdtsc();
-  for (s32 branchIndex = 0; branchIndex < branchesCount; ++branchIndex)
+  for (s32 branchIndex = 0; branchIndex < originalSolution.branchesCount; ++branchIndex)
   {
-    Branch b = branches[branchIndex];
+    Branch b = originalSolution.branches[branchIndex];
     if (b.state.type != TypeSteadyStateIndex)
     {
       continue;
@@ -1080,7 +1098,7 @@ Failures check_steady_states_correct()
     Position position = get_position(b);
     //printf("checking \"%.*hs\"...\n", position.movesCount, position.moves);
     u64 tscStart = __rdtsc();
-    char const* problem = _verify_entry(position, steadyStates[steadyStateIndex]);
+    char const* problem = _verify_entry(position, originalSolution.steadyStates[steadyStateIndex]);
     u64 tscEnd = __rdtsc();
     if (memo.boardsCount > maxMemo)
     {
@@ -1097,7 +1115,7 @@ Failures check_steady_states_correct()
   return result;
 }
 
-int main()
+void test0()
 {
   Position position = {};
   //position.moves = "121212";
@@ -1120,11 +1138,89 @@ int main()
   };
   Move move = query_steady_state(board, diagram);
   printf("move = %d\n", move);
-  load_branches("branches.json");
-  printf("%d branches loaded\n", branchesCount);
-  load_steady_states("steady_states.json");
-  printf("%d steady states loaded\n", steadyStatesCount);
+}
+
+void printBranchesWithReplacements(const Replacements& replacements)
+{
+  printf("new branches with old steady state ids:\n");
+  printf("{\n");
+  for (s32 branchIndex = 0; branchIndex < originalSolution.branchesCount; ++branchIndex)
+  {
+    const Branch b = originalSolution.branches[branchIndex];
+    const s16 newSteadyState = replacements.newSteadyStates[branchIndex];
+    BranchMove state = b.state;
+    if (newSteadyState != -1)
+    {
+      if (state.type != TypeSteadyStateIndex)
+      {
+        fprintf(stderr, "unexpected branch type change\n");
+        exit(-1);
+      }
+      state.type = TypeSteadyStateIndex;
+      state.value = newSteadyState;
+    }
+    if (state.type == TypeMove)
+    {
+      printf("  \"%.*hs\": \"%c\",\n", b.movesCount, b.moves, (char)state.value);
+    }
+    else
+    {
+      printf("  \"%.*hs\": %d,\n", b.movesCount, b.moves, state.value);
+    }
+  }
+  printf("}\n");
+}
+
+int getTotalBranchesCovered(const SteadyStates& steadyStates, const SteadyStateToAllBranchesItSolves& allToAll)
+{
+  static bool branchIsCovered[MAX_BRANCHES] = {};
+  memset(branchIsCovered, 0, sizeof branchIsCovered);
+  for (s16 i = 0; i < steadyStates.statesCount; ++i)
+  {
+    s16 steadyStateIndex = steadyStates.states[i];
+    auto m = &allToAll.table[steadyStateIndex];
+    for (s16 j = 0; j < m->branchIndexesCount; ++j)
+    {
+      s16 branchIndex = m->branchIndexes[j];
+      branchIsCovered[branchIndex] = true;
+    }
+  }
+  int totalBranchesCovered = 0;
+  for (s16 i = 0; i < MAX_BRANCHES; ++i)
+  {
+    if (branchIsCovered[i])
+    {
+      totalBranchesCovered += 1;
+    }
+  }
+  return totalBranchesCovered;
+}
+
+int main()
+{
+#if 0
+  loadBranches(originalSolution, originalFiles, "branches.json");
+  printf("%d branches loaded\n", originalSolution.branchesCount);
+  loadSteadyStates(originalSolution, originalFiles, "steady_states.json");
+  printf("%d steady states loaded\n", originalSolution.steadyStatesCount);
+#else
+  loadBranches(originalSolution, originalFiles, "new-branches-optimal.json");
+  printf("%d branches loaded\n", originalSolution.branchesCount);
+  loadSteadyStates(originalSolution, originalFiles, "new-steady-states-optimal.json");
+  printf("%d steady states loaded\n", originalSolution.steadyStatesCount);
+#endif
 #if 1
+  int longestBranch = 0;
+  for (s16 i = 0; i < originalSolution.branchesCount; ++i)
+  {
+    Branch b = originalSolution.branches[i];
+    if (b.state.type == TypeMove && b.movesCount > longestBranch)
+    {
+      longestBranch = b.movesCount;
+    }
+  }
+  printf("longest branch size %d, free space %d\n", longestBranch, 42 - longestBranch);
+#endif
   Failures failures = check_steady_states_correct();
   printf("%d failures:\n", failures.failuresCount);
   for (s32 i = 0; i < failures.failuresCount; ++i)
@@ -1135,12 +1231,44 @@ int main()
 #if MEASURE_PERF
   printf("query %lf, makes_four %lf\n", queryTicks / cpuFrequencyEstimate, makesFourTicks / cpuFrequencyEstimate);
 #endif
-  collect_all_positions_for_all_steady_states();
-  collect_useful_steady_states_greedy();
-  fillRemappings();
-  printf("new steady states count %d\n", usefulSteadyStatesCount);
-  outBranches("new-branches.json", newBranches, branchesCount);
-  outNewSteadyStates("new-steady-states.json");
+#if 0
+  static SteadyStateToAllBranchesItSolves allToAll;
+  collectAllPositionsForAllSteadyStates(allToAll);
+  // greedy solution (260):
+  {
+    static Replacements branchesReplacements;
+    static SteadyStates steadyStatesCoverGreedy;
+    setCoverGreedy(branchesReplacements, originalSolution.branchesCount, steadyStatesCoverGreedy, originalSolution.steadyStatesCount, allToAll);
+    static SteadyStateIdsRemappings remap;
+    fillRemappings(remap, steadyStatesCoverGreedy, originalSolution.steadyStatesCount);
+    static ConnectFourSolution reducedSolution;
+    fillSolutionFromRemappings(reducedSolution, originalSolution, remap, branchesReplacements);
+    int totalBranchesCovered = getTotalBranchesCovered(steadyStatesCoverGreedy, allToAll);
+    printf("total branches covered greedy %d\n", totalBranchesCovered);
+    printf("new steady states count by greedy method %d\n", steadyStatesCoverGreedy.statesCount);
+    outBranches("new-branches-greedy.json", reducedSolution.branches, reducedSolution.branchesCount);
+    outSteadyStates("new-steady-states-greedy.json", reducedSolution.steadyStates, reducedSolution.steadyStatesCount);
+  }
+  // actual set cover solution (258):
+  {
+    static Replacements branchesReplacements =
+    {
+#include "set-covering/set-cover-element-to-subset.c"
+    };
+    static SteadyStates steadyStatesCover =
+    {
+#include "set-covering/set-cover-subsets.c"
+    };
+    static SteadyStateIdsRemappings remap;
+    fillRemappings(remap, steadyStatesCover, originalSolution.steadyStatesCount);
+    static ConnectFourSolution reducedSolution;
+    fillSolutionFromRemappings(reducedSolution, originalSolution, remap, branchesReplacements);
+    int totalBranchesCovered = getTotalBranchesCovered(steadyStatesCover, allToAll);
+    printf("total branches covered optimal %d\n", totalBranchesCovered);
+    printf("new steady states count by optimal method %d\n", steadyStatesCover.statesCount);
+    outBranches("new-branches-optimal.json", reducedSolution.branches, reducedSolution.branchesCount);
+    outSteadyStates("new-steady-states-optimal.json", reducedSolution.steadyStates, reducedSolution.steadyStatesCount);
+  }
 #endif
   return 0;
 }
