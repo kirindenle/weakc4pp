@@ -1,2 +1,2 @@
 @echo off
-build-v2.cmd
+build-v3.cmd
