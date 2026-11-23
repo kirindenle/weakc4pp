@@ -20,14 +20,14 @@ typedef int64_t s64;
 
 // TODO: try typesafe indexes here
 #define SUBSETS_COUNT 384
-#define MAX_SUBSET_SIZE 25
+#define MAX_SUBSET_SIZE 63
 struct ElementIndex { s16 index; bool operator==(ElementIndex i) { return index == i.index; } };
 struct alignas(64) Subset
 {
   s16 elementsCount;
   ElementIndex elements[MAX_SUBSET_SIZE];
   // TODO: generalize
-  s16 pad[32 - MAX_SUBSET_SIZE - 1]; // lets be 64 bytes
+  //s16 pad[32 - MAX_SUBSET_SIZE - 1]; // lets be 64 bytes
 };
 bool operator<=(const Subset &s1, const Subset &s2)
 {
@@ -46,7 +46,8 @@ bool operator<=(const Subset &s1, const Subset &s2)
   }
   return true;
 }
-#include "steadyStatesToBranches.c"
+#include "allToAll.c"
+//#include "steadyStatesToBranches.c"
 struct SubsetIndex { s16 index; };
 static Subset* getSubset(SubsetIndex i)
 {
